@@ -1,32 +1,19 @@
 version: "3"
 
 services:
-  redis-state:
-    image: faasm/redis:${FAASM_VERSION}
-
-  redis-queue:
-    image: faasm/redis:${FAASM_VERSION}
+  redis:
+    image: redis
 
   worker:
     image: docker.io/brapper13/helloworld-python
     expose:
       - "8080"
     privileged: yes
-    volumes:
-      - ./machine-code/:/usr/local/faasm/object/
     environment:
       - FUNCTION_STORAGE=fileserver
       - FILESERVER_URL=http://upload:8002
       - LOG_LEVEL=info
-      - CGROUP_MODE=on
-      - NETNS_MODE=off
-      - REDIS_STATE_HOST=redis-state
-      - REDIS_QUEUE_HOST=redis-queue
-      - THREADS_PER_WORKER=20
-      - MAX_IN_FLIGHT_RATIO=1
-      - MAX_WORKERS_PER_FUNCTION=4
-      - GLOBAL_MESSAGE_TIMEOUT=600000
-      - CAPTURE_STDOUT=on
+      - REDIS_HOST=redis
 
   nginx:
     image: nginx:latest
