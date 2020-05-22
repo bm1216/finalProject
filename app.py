@@ -9,13 +9,39 @@ import time
 from os import remove, makedirs
 from os.path import exists, join
 from time import sleep
+import logging
+from pythonjsonlogger import jsonlogger
+import sys
 
 import psutil
+from datetime import datetime
 
 # Adapted from the hello world Python found at
 # https://knative.dev/docs/serving/samples/hello-world/helloworld-python/
 
 app = Flask(__name__)
+
+class CustomJsonFormatter(jsonlogger.JsonFormatter):
+    def add_fields(self, log_record, record, message_dict):
+        super(CustomJsonFormatter, self).add_fields(log_record, record, message_dict)
+        if not log_record.get('timestamp'):
+            # this doesn't use record.created, so it is slightly off
+            now = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+            log_record['timestamp'] = now
+        if log_record.get('level'):
+            log_record['level'] = log_record['level'].upper()
+        else:
+            log_record['level'] = record.levelname
+
+formatter = CustomJsonFormatter('(timestamp) (level) (name) (message)')
+
+# init the logger as usual
+logger = logging.getLogger()
+logger.setLevel(os.environ.get('LOG_LEVEL', 'DEBUG'))
+logHandler = logging.StreamHandler()
+logHandler.setFormatter(formatter)
+logger.addHandler(logHandler)
+
 db = redis.Redis(host=os.environ.get('REDIS_HOST', 'redis'))
 ONE_MB = 1024.0 * 1024.0
 
@@ -34,7 +60,7 @@ def register_this_container():
   bashCommand = """head -1 /proc/self/cgroup|cut -d/ -f3"""
   output = subprocess.check_output(['bash','-c', bashCommand])
 
-  print("CONTAINER_ID: " + output)
+  logger.info(output)
 
   db.rpush("containers", output)
 
@@ -69,23 +95,23 @@ def check_resources(reqs):
   Checks if this host has enough resources
   """
 
-  print(reqs)
+  logger.info("REQUIREMENTS: " + str(reqs))
 
   # We need to execute this once initially or it returns 0.0
   psutil.cpu_percent(percpu=True, interval=None)
 
   cpu_pct_per_cpu = psutil.cpu_percent(percpu=True)
   mem = psutil.virtual_memory()
-  print(mem)
+  logger.info(mem)
   req_mem = float(''.join(filter(str.isdigit, reqs["mem"])))
-  print("REQ_MEM: " + str(req_mem))
+  logger.info("REQ_MEM: " + str(req_mem))
   
   # Check if both memory and cpu constraints are satisfied.
   if (mem.available/ONE_MB > req_mem):
-    print("MEM AVAILABLE: " + str(mem.available/ONE_MB))
+    logger.info("MEM AVAILABLE: " + str(mem.available/ONE_MB))
     for util in cpu_pct_per_cpu:
       free = (100 - util)/100
-      print("FREE: " + str(free))
+      logger.info("FREE: " + str(free))
       if ( free > float(reqs["cpu"]) ):
         return True
     return False
@@ -127,34 +153,31 @@ def req(resources):
   def decorator_resource(func):
     @functools.wraps(func)
     def wrapper_resource(*args, **kwargs):
-      try:
-        # # Do I have enough resources to execute this function?
-        have_enough = check_resources(resources)
+      # # Do I have enough resources to execute this function?
+      have_enough = check_resources(resources)
 
-        print("HAVE ENOUGH: " + str(have_enough))
+      logger.info("HAVE ENOUGH: " + str(have_enough))
 
-        if have_enough:
-          # Execute the function and return
-          value = func(*args, **kwargs)
-          return value
-        # else:
-        #     # Find a better container
-        #     best_host = find_best_container_for_func(func_name, reqs)
+      if have_enough:
+        # Execute the function and return
+        value = func(*args, **kwargs)
+        return value
+      # else:
+      #   # Find a better container
+      #   best_host = find_best_container_for_func(func_name, reqs)
 
-        #     if best_host:
-        #         # We've found a better host, execute it there
-        #         execute_function_on_host(best_host, func_name)
-        #     else:
-        #         # Have to execute it here as there's no better host
-        #         execute_function(func_name)
+      #   if best_host:
+      #       # We've found a better host, execute it there
+      #       execute_function_on_host(best_host, func_name)
+      #   else:
+      #       # Have to execute it here as there's no better host
+      #       execute_function(func_name)
 
-        #         # This means the system is overloaded, we can request more resources from Knative?
-        #         request_more_resources()
+      #       # This means the system is overloaded, we can request more resources from Knative?
+      #       request_more_resources()
 
-        # Update the records for this host
-        update_resources_for_this_host()
-      except Exception as e:
-        print(e)
+      # Update the records for this host
+      update_resources_for_this_host()
 
     return wrapper_resource
   return decorator_resource
@@ -179,5 +202,5 @@ def function_two():
 
 
 if __name__ == "__main__":
-  # register_this_container()
-  app.run(debug=True, host='0.0.0.0', port=int(os.environ.get('PORT', 8000)))
+  register_this_container()
+  app.run(debug=True, host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))

@@ -6,13 +6,15 @@ services:
 
   worker:
     image: docker.io/brapper13/helloworld-python
+    depends_on:
+      - redis
     expose:
       - "8080"
     privileged: yes
     environment:
       - FUNCTION_STORAGE=fileserver
       - FILESERVER_URL=http://upload:8002
-      - LOG_LEVEL=info
+      - LOG_LEVEL=DEBUG
       - REDIS_HOST=redis
       
   nginx:
