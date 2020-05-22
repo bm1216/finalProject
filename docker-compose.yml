@@ -14,7 +14,7 @@ services:
       - FILESERVER_URL=http://upload:8002
       - LOG_LEVEL=info
       - REDIS_HOST=redis
-
+      
   nginx:
     image: nginx:latest
     volumes:
