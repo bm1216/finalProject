@@ -58,11 +58,13 @@ def register_this_container():
 
   # Get container id. 
   bashCommand = """head -1 /proc/self/cgroup|cut -d/ -f3"""
-  output = subprocess.check_output(['bash','-c', bashCommand])
+  output = str(subprocess.check_output(['bash','-c', bashCommand]), "utf-8").strip()
 
   logger.info(output)
 
   db.rpush("containers", output)
+
+  logger.info(db.lrange("containers", 0, -1))
 
 
 def update_resources_for_this_host():
@@ -201,7 +203,9 @@ def function_two():
 # MAIN
 # -------------------------------------
 
+in_container = os.environ.get('IN_CONTAINER', False)
+if (in_container):
+  register_this_container()
 
 if __name__ == "__main__":
-  register_this_container()
   app.run(debug=True, host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))

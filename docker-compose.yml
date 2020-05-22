@@ -16,6 +16,7 @@ services:
       - FILESERVER_URL=http://upload:8002
       - LOG_LEVEL=DEBUG
       - REDIS_HOST=redis
+      - IN_CONTAINER=True
       
   nginx:
     image: nginx:latest
