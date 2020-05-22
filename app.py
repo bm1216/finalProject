@@ -110,7 +110,8 @@ def check_resources(reqs):
   if (mem.available/ONE_MB > req_mem):
     logger.info("MEM AVAILABLE: " + str(mem.available/ONE_MB))
     for util in cpu_pct_per_cpu:
-      free = (100 - util)/100
+      logger.info("UTIL: " + str(util))
+      free = (100 - util)/float(100)
       logger.info("FREE: " + str(free))
       if ( free > float(reqs["cpu"]) ):
         return True
