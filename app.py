@@ -34,6 +34,8 @@ def register_this_container():
   bashCommand = """head -1 /proc/self/cgroup|cut -d/ -f3"""
   output = subprocess.check_output(['bash','-c', bashCommand])
 
+  print("CONTAINER_ID: " + output)
+
   db.rpush("containers", output)
 
 
@@ -67,18 +69,24 @@ def check_resources(reqs):
   Checks if this host has enough resources
   """
 
+  print(reqs)
+
   # We need to execute this once initially or it returns 0.0
   psutil.cpu_percent(percpu=True, interval=None)
 
   cpu_pct_per_cpu = psutil.cpu_percent(percpu=True)
   mem = psutil.virtual_memory()
-  req_mem = float(''.join(filter(str.isdigit, reqs.mem)))
+  print(mem)
+  req_mem = float(''.join(filter(str.isdigit, reqs["mem"])))
+  print("REQ_MEM: " + str(req_mem))
   
   # Check if both memory and cpu constraints are satisfied.
   if (mem.available/ONE_MB > req_mem):
+    print("MEM AVAILABLE: " + str(mem.available/ONE_MB))
     for util in cpu_pct_per_cpu:
       free = (100 - util)/100
-      if ( free > reqs.cpu ):
+      print("FREE: " + str(free))
+      if ( free > float(reqs["cpu"]) ):
         return True
     return False
   else:
@@ -109,7 +117,6 @@ def execute_function(func_name):
     return 404
 
 
-
 def request_more_resources():
   """
   Asks knative for more application resources, because we think we've run out
@@ -120,29 +127,34 @@ def req(resources):
   def decorator_resource(func):
     @functools.wraps(func)
     def wrapper_resource(*args, **kwargs):
-      # # Do I have enough resources to execute this function?
-      have_enough = check_resources(resources)
+      try:
+        # # Do I have enough resources to execute this function?
+        have_enough = check_resources(resources)
 
-      if have_enough:
-        # Execute the function and return
-        value = func(*args, **kwargs)
-        return value
-      # else:
-      #     # Find a better container
-      #     best_host = find_best_container_for_func(func_name, reqs)
+        print("HAVE ENOUGH: " + str(have_enough))
 
-      #     if best_host:
-      #         # We've found a better host, execute it there
-      #         execute_function_on_host(best_host, func_name)
-      #     else:
-      #         # Have to execute it here as there's no better host
-      #         execute_function(func_name)
+        if have_enough:
+          # Execute the function and return
+          value = func(*args, **kwargs)
+          return value
+        # else:
+        #     # Find a better container
+        #     best_host = find_best_container_for_func(func_name, reqs)
 
-      #         # This means the system is overloaded, we can request more resources from Knative?
-      #         request_more_resources()
+        #     if best_host:
+        #         # We've found a better host, execute it there
+        #         execute_function_on_host(best_host, func_name)
+        #     else:
+        #         # Have to execute it here as there's no better host
+        #         execute_function(func_name)
 
-      # Update the records for this host
-      update_resources_for_this_host()
+        #         # This means the system is overloaded, we can request more resources from Knative?
+        #         request_more_resources()
+
+        # Update the records for this host
+        update_resources_for_this_host()
+      except Exception as e:
+        print(e)
 
     return wrapper_resource
   return decorator_resource
@@ -167,5 +179,5 @@ def function_two():
 
 
 if __name__ == "__main__":
-  register_this_container()
+  # register_this_container()
   app.run(debug=True, host='0.0.0.0', port=int(os.environ.get('PORT', 8000)))
