@@ -12,6 +12,8 @@ from time import sleep
 import logging
 from pythonjsonlogger import jsonlogger
 import sys
+import signal
+import socket
 
 import psutil
 from datetime import datetime
@@ -20,6 +22,7 @@ from datetime import datetime
 # https://knative.dev/docs/serving/samples/hello-world/helloworld-python/
 
 app = Flask(__name__)
+SET_NAME = "containers"
 
 class CustomJsonFormatter(jsonlogger.JsonFormatter):
     def add_fields(self, log_record, record, message_dict):
@@ -42,13 +45,26 @@ logHandler = logging.StreamHandler()
 logHandler.setFormatter(formatter)
 logger.addHandler(logHandler)
 
+
 db = redis.Redis(host=os.environ.get('REDIS_HOST', 'redis'))
+# UGLY: busy waiting for redis to become live.
+while db.ping() != 'PONG':
+  logger.info(db.ping())
+  time.sleep(1)
+
 ONE_MB = 1024.0 * 1024.0
 
 # -------------------------------------
 # UNDERLYING SYSTEM
 # -------------------------------------
-
+def get_resources():
+  # We need to execute this once initially or it returns 0.0
+  psutil.cpu_percent(percpu=True, interval=None)
+  cpu_pct_per_cpu = psutil.cpu_percent(percpu=True)
+  mem = psutil.virtual_memory()
+  logger.info(mem)
+  cpu_free_per_cpu = [(100 - util)/float(100) for util in cpu_pct_per_cpu]
+  return cpu_free_per_cpu, mem.available
 
 def register_this_container():
   """
@@ -57,15 +73,20 @@ def register_this_container():
   """
 
   # Get container id. 
-  bashCommand = """head -1 /proc/self/cgroup|cut -d/ -f3"""
-  output = str(subprocess.check_output(['bash','-c', bashCommand]), "utf-8").strip()
+  # bash_command = """head -1 /proc/self/cgroup|cut -d/ -f3"""
+  # output = str(subprocess.check_output(['bash','-c', bash_command]), "utf-8").strip()
 
-  logger.info(output)
+  # logger.info(output)
 
-  db.rpush("containers", output)
+  my_host_name = socket.gethostname()
+  my_ip = socket.gethostbyname(my_host_name)
+  free_cpu, free_mem = get_resources()
 
-  logger.info(db.lrange("containers", 0, -1))
+  logger.info({"host_name": my_host_name, "ip": my_ip})
 
+  pipe = db.pipeline()
+  pipe.sadd(SET_NAME, my_ip).hmset(my_host_name, {"host_id": my_host_name, "cpu": free_cpu, "mem": free_mem})
+  pipe.execute()
 
 def update_resources_for_this_host():
   """
@@ -91,42 +112,47 @@ def top_level_handler():
     return value
 
 
-
 def check_resources(reqs):
   """
-  Checks if this host has enough resources
+  Get current free resources and checks if this host has enough resources
   """
-
   logger.info("REQUIREMENTS: " + str(reqs))
+  free_cpu, free_mem = get_resources()
+  return check_if_free_resources(free_mem, free_cpu, reqs)
 
-  # We need to execute this once initially or it returns 0.0
-  psutil.cpu_percent(percpu=True, interval=None)
-
-  cpu_pct_per_cpu = psutil.cpu_percent(percpu=True)
-  mem = psutil.virtual_memory()
-  logger.info(mem)
+def check_if_free_resources(mem, cpu_free_per_cpu, reqs):
+  """
+  Checks if both memory and cpu constraints are satisfied.
+  """
   req_mem = float(''.join(filter(str.isdigit, reqs["mem"])))
-  logger.info("REQ_MEM: " + str(req_mem))
-  
-  # Check if both memory and cpu constraints are satisfied.
   if (mem.available/ONE_MB > req_mem):
     logger.info("MEM AVAILABLE: " + str(mem.available/ONE_MB))
-    for util in cpu_pct_per_cpu:
-      logger.info("UTIL: " + str(util))
-      free = (100 - util)/float(100)
+    for free in cpu_free_per_cpu:
       logger.info("FREE: " + str(free))
       if ( free > float(reqs["cpu"]) ):
         return True
     return False
   else:
-    return False
-
+    return False  
 
 def find_best_container_for_func(func_name, reqs):
   """
-  Find the best container to execute this function
+  Find the best container to execute this function.
+  Using the sort(filter()) technique to find the best container.
   """
-  pass
+  containers = db.smembers(SET_NAME)
+  valid_containers = []
+
+  # Get a list of valid containers.
+  for container in containers: 
+    logger.info(container)
+    container_info = db.hgetall(container)
+
+    if (check_if_free_resources(container_info.mem, container_info.cpu, reqs)):
+      valid_containers.append(container)
+
+  # For now just return the first valid container.
+  return None if not valid_containers else valid_containers[0]
 
 
 def execute_function_on_host(best_host, func_name):
