@@ -3,3 +3,4 @@ gunicorn
 redis
 psutil
 python-json-logger
+requests

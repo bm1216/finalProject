@@ -14,6 +14,8 @@ from pythonjsonlogger import jsonlogger
 import sys
 import signal
 import socket
+import requests
+import functions 
 
 import psutil
 from datetime import datetime
@@ -24,17 +26,20 @@ from datetime import datetime
 app = Flask(__name__)
 SET_NAME = "containers"
 
+
 class CustomJsonFormatter(jsonlogger.JsonFormatter):
-    def add_fields(self, log_record, record, message_dict):
-        super(CustomJsonFormatter, self).add_fields(log_record, record, message_dict)
-        if not log_record.get('timestamp'):
-            # this doesn't use record.created, so it is slightly off
-            now = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%fZ')
-            log_record['timestamp'] = now
-        if log_record.get('level'):
-            log_record['level'] = log_record['level'].upper()
-        else:
-            log_record['level'] = record.levelname
+  def add_fields(self, log_record, record, message_dict):
+    super(CustomJsonFormatter, self).add_fields(
+        log_record, record, message_dict)
+    if not log_record.get('timestamp'):
+      # this doesn't use record.created, so it is slightly off
+      now = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+      log_record['timestamp'] = now
+    if log_record.get('level'):
+      log_record['level'] = log_record['level'].upper()
+    else:
+      log_record['level'] = record.levelname
+
 
 formatter = CustomJsonFormatter('(timestamp) (level) (name) (message)')
 
@@ -57,6 +62,8 @@ ONE_MB = 1024.0 * 1024.0
 # -------------------------------------
 # UNDERLYING SYSTEM
 # -------------------------------------
+
+
 def get_resources():
   # We need to execute this once initially or it returns 0.0
   psutil.cpu_percent(percpu=True, interval=None)
@@ -66,13 +73,14 @@ def get_resources():
   cpu_free_per_cpu = [(100 - util)/float(100) for util in cpu_pct_per_cpu]
   return cpu_free_per_cpu, mem.available
 
+
 def register_this_container():
   """
   Registers this container in the shared database. This allows other
   containers to look it up and send functions to it
   """
 
-  # Get container id. 
+  # Get container id.
   # bash_command = """head -1 /proc/self/cgroup|cut -d/ -f3"""
   # output = str(subprocess.check_output(['bash','-c', bash_command]), "utf-8").strip()
 
@@ -85,14 +93,24 @@ def register_this_container():
   logger.info({"host_name": my_host_name, "ip": my_ip})
 
   pipe = db.pipeline()
-  pipe.sadd(SET_NAME, my_ip).hmset(my_host_name, {"host_id": my_host_name, "cpu": free_cpu, "mem": free_mem})
+  pipe.sadd(SET_NAME, my_ip).hmset(my_ip, {
+      "host_id": my_host_name, "cpu": free_cpu, "mem": free_mem})
   pipe.execute()
+
 
 def update_resources_for_this_host():
   """
   Registers this container's resources in the shared database.
   """
-  pass
+  my_host_name = socket.gethostname()
+  my_ip = socket.gethostbyname(my_host_name)
+  free_cpu, free_mem = get_resources()
+
+  logger.info("UPDATING", extra = {"host_name": my_host_name, "ip": my_ip})
+
+  pipe = db.pipeline()
+  pipe.hmset(my_ip, {"cpu": free_cpu, "mem": free_mem})
+  pipe.execute()
 
 
 @app.route('/')
@@ -100,7 +118,7 @@ def top_level_handler():
   # Get request input
   json_data = request.get_json()
 
-  ## Work out which function this refers to
+  # Work out which function this refers to
   func_name = json_data.get("func")
 
   # Execute the function who's name is provided
@@ -120,6 +138,7 @@ def check_resources(reqs):
   free_cpu, free_mem = get_resources()
   return check_if_free_resources(free_mem, free_cpu, reqs)
 
+
 def check_if_free_resources(mem, cpu_free_per_cpu, reqs):
   """
   Checks if both memory and cpu constraints are satisfied.
@@ -129,11 +148,12 @@ def check_if_free_resources(mem, cpu_free_per_cpu, reqs):
     logger.info("MEM AVAILABLE: " + str(mem.available/ONE_MB))
     for free in cpu_free_per_cpu:
       logger.info("FREE: " + str(free))
-      if ( free > float(reqs["cpu"]) ):
+      if (free > float(reqs["cpu"])):
         return True
     return False
   else:
-    return False  
+    return False
+
 
 def find_best_container_for_func(func_name, reqs):
   """
@@ -144,7 +164,7 @@ def find_best_container_for_func(func_name, reqs):
   valid_containers = []
 
   # Get a list of valid containers.
-  for container in containers: 
+  for container in containers:
     logger.info(container)
     container_info = db.hgetall(container)
 
@@ -159,7 +179,8 @@ def execute_function_on_host(best_host, func_name):
   """
   Executes the function on another host
   """
-  pass
+  r = requests.get("{best_host}", json={"func": func_name})
+  return r.content
 
 
 def execute_function(func_name):
@@ -167,7 +188,7 @@ def execute_function(func_name):
   Executes the function on this host
   """
   try:
-    return globals()[func_name]()
+    return getattr(functions, func_name)()
   except:
     return 404
 
@@ -176,58 +197,12 @@ def request_more_resources():
   """
   Asks knative for more application resources, because we think we've run out
   """
-  pass
-
-def req(resources):
-  def decorator_resource(func):
-    @functools.wraps(func)
-    def wrapper_resource(*args, **kwargs):
-      # # Do I have enough resources to execute this function?
-      have_enough = check_resources(resources)
-
-      logger.info("HAVE ENOUGH: " + str(have_enough))
-
-      if have_enough:
-        # Execute the function and return
-        value = func(*args, **kwargs)
-        return value
-      # else:
-      #   # Find a better container
-      #   best_host = find_best_container_for_func(func_name, reqs)
-
-      #   if best_host:
-      #       # We've found a better host, execute it there
-      #       execute_function_on_host(best_host, func_name)
-      #   else:
-      #       # Have to execute it here as there's no better host
-      #       execute_function(func_name)
-
-      #       # This means the system is overloaded, we can request more resources from Knative?
-      #       request_more_resources()
-
-      # Update the records for this host
-      update_resources_for_this_host()
-
-    return wrapper_resource
-  return decorator_resource
-
-# -------------------------------------
-# APPLICATION FUNCTIONS
-# -------------------------------------
-
-@req({"mem": "250MB", "cpu": "0.8"})
-def function_one():
-  # TODO
-  return "Hello function one."
-
-@req({"mem": "500MB", "cpu": "0.5"})
-def function_two():
-  # TODO
-  return "Hello function two."
+  logger.info("NEED MORE RESOURCES!!!!")
 
 # --------------------------------------
 # MAIN
 # -------------------------------------
+
 
 in_container = os.environ.get('IN_CONTAINER', False)
 if (in_container):
