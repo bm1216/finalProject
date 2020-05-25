@@ -1,7 +1,7 @@
 import psutil
 import socket
 import requests
-from app import logger
+from logger import logger
 
 SET_NAME = "containers"
 ONE_MB = 1024.0 * 1024.0
@@ -12,12 +12,14 @@ ONE_MB = 1024.0 * 1024.0
 
 def get_resources():
   # We need to execute this once initially or it returns 0.0
-  psutil.cpu_percent(percpu=True, interval=None)
   cpu_pct_per_cpu = psutil.cpu_percent(percpu=True)
   mem = psutil.virtual_memory()
   logger.info(mem)
-  cpu_free_per_cpu = [(100 - util)/float(100) for util in cpu_pct_per_cpu]
-  return cpu_free_per_cpu, mem.available
+  free_cpu = 0
+  for util in cpu_pct_per_cpu:
+    free_cpu = free_cpu + (100 - util)/float(100)
+
+  return free_cpu, mem.available
 
 
 def register_this_container(db):
@@ -37,11 +39,14 @@ def register_this_container(db):
   free_cpu, free_mem = get_resources()
 
   logger.info({"host_name": my_host_name, "ip": my_ip})
-
-  pipe = db.pipeline()
-  pipe.sadd(SET_NAME, my_ip).hmset(my_ip, {
-      "host_id": my_host_name, "cpu": free_cpu, "mem": free_mem})
-  pipe.execute()
+  try:
+    pipe = db.pipeline()
+    pipe.sadd(SET_NAME, my_ip).hmset(my_ip, {
+        "host_id": my_host_name, "cpu": free_cpu, "mem": free_mem})
+    pipe.execute()
+  except Exception as e:
+    logger.error(e)
+    raise e
 
 
 def update_resources_for_this_host(db):
@@ -52,11 +57,12 @@ def update_resources_for_this_host(db):
   my_ip = socket.gethostbyname(my_host_name)
   free_cpu, free_mem = get_resources()
 
-  logger.info("UPDATING", extra = {"host_name": my_host_name, "ip": my_ip})
-
-  pipe = db.pipeline()
-  pipe.hmset(my_ip, {"cpu": free_cpu, "mem": free_mem})
-  pipe.execute()
+  logger.info("UPDATING", extra = {"cpu": free_cpu, "mem": free_mem, "ip": my_ip})
+  try:
+     db.hmset(my_ip, {"cpu": free_cpu, "mem": free_mem})
+  except Exception as e:
+    logger.error(e)
+    raise e  
 
 def check_resources(reqs):
   """
@@ -67,19 +73,18 @@ def check_resources(reqs):
   return check_if_free_resources(free_mem, free_cpu, reqs)
 
 
-def check_if_free_resources(mem, cpu_free_per_cpu, reqs):
+def check_if_free_resources(free_mem, free_cpu, reqs):
   """
   Checks if both memory and cpu constraints are satisfied.
   """
   req_mem = float(''.join(filter(str.isdigit, reqs["mem"])))
-  if (mem.available/ONE_MB > req_mem):
-    logger.info("MEM AVAILABLE: " + str(mem.available/ONE_MB))
-    for free in cpu_free_per_cpu:
-      logger.info("FREE: " + str(free))
-      if (free > float(reqs["cpu"])):
-        return True
-    return False
+  logger.info("CHECK FOR RESOURCES", extra={"mem": free_mem, "cpu": free_cpu, "req_mem": req_mem})
+  if (free_mem/ONE_MB > req_mem and free_cpu > float(reqs["cpu"])):
+    logger.info("MEM AVAILABLE: " + str(free_mem/ONE_MB))
+    logger.info("CPU FREE: " + str(free_cpu))
+    return True
   else:
+    logger.info("FAILED RESOURCE REQUIREMENTS")
     return False
 
 
@@ -91,22 +96,34 @@ def find_best_container_for_func(db, func_name, reqs):
   containers = db.smembers(SET_NAME)
   valid_containers = []
 
+  logger.info("CONTAINERS: " + str(containers))
+
   # Get a list of valid containers.
   for container in containers:
+    container = str(container, encoding="utf-8")
     logger.info(container)
-    container_info = db.hgetall(container)
+    try:
+      container_info = db.hgetall(container)
+    except Exception as e:
+      logger.error(e)
+      raise e
+
+    logger.info("INFO", extra={"cpu": container_info.cpu, "mem": container_info.mem})
 
     if (check_if_free_resources(container_info.mem, container_info.cpu, reqs)):
       valid_containers.append(container)
 
+  logger.info("THESE ARE THE BEST CONTAINERS", extra={"valid_containers": valid_containers})
   # For now just return the first valid container.
   return None if not valid_containers else valid_containers[0]
 
-def execute_function_on_host(db, best_host, func_name):
+def execute_function_on_host(best_host, func_name):
   """
   Executes the function on another host
   """
+  logger.info("SENDING request to best host.")
   r = requests.get("{best_host}", json={"func": func_name})
+  logger.info(r)
   return r.content
 
 def request_more_resources():
