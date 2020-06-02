@@ -12,6 +12,7 @@ from time import sleep
 import logging
 import sys
 import psutil
+import signal
 
 from logger import logger
 import system
@@ -23,6 +24,15 @@ app = Flask(__name__)
 cache = {}
 
 db = redis.Redis(host=os.environ.get('REDIS_HOST', 'localhost'), decode_responses=True)
+system.register_this_container(cache, db)
+
+def exit_gracefully(signum, frame):
+  logger.info("Quitting Gracefully. Removing containers from db.")
+  db.srem("containers", cache["ip"])
+  sys.exit()
+
+signal.signal(signal.SIGINT, exit_gracefully)
+signal.signal(signal.SIGTERM, exit_gracefully)
 
 # UGLY: busy waiting for redis to become live.
 while not db.ping():
@@ -93,8 +103,6 @@ def function_two(*args, **kwargs):
 # --------------------------------------
 # MAIN
 # -------------------------------------
-
-system.register_this_container(cache, db)
 
 @app.route('/')
 def top_level_handler():

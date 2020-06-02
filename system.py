@@ -59,7 +59,6 @@ def update_resources_for_this_host(cache, db):
   free_cpu, free_mem = get_resources()
   my_ip = cache["ip"]
 
-
   logger.info("UPDATING", extra = {"cpu": free_cpu, "mem": free_mem, "ip": my_ip})
   try:
      db.hmset(my_ip, {"cpu": free_cpu, "mem": free_mem})
@@ -133,6 +132,8 @@ def execute_function_on_host(best_host, func_name):
   logger.info("SENDING request to best host.")
   r = requests.get("http://{}:8080/".format(best_host), json={"func": func_name})
   logger.info(r)
+  if (r.status_code != 200):
+    raise Exception("Could not execute function on host {}".format(best_host))
   return r.content
 
 def request_more_resources():
