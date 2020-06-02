@@ -2,3 +2,4 @@ machine-code/
 istio-*
 *-workspace
 __*
+test.py

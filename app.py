@@ -20,8 +20,10 @@ import system
 # https://knative.dev/docs/serving/samples/hello-world/helloworld-python/
 
 app = Flask(__name__)
+cache = {}
 
-db = redis.Redis(host=os.environ.get('REDIS_HOST', 'redis'))
+db = redis.Redis(host=os.environ.get('REDIS_HOST', 'localhost'), decode_responses=True)
+
 # UGLY: busy waiting for redis to become live.
 while not db.ping():
   logger.info(db.ping())
@@ -44,7 +46,7 @@ def req(resources):
         value = func(*args, **kwargs)
       else:
         # Find a better container
-        best_host = system.find_best_container_for_func(db, args[0], resources)
+        best_host = system.find_best_container_for_func(cache, db, resources)
 
         if best_host:
           # We've found a better host, execute it there
@@ -57,7 +59,7 @@ def req(resources):
           system.request_more_resources()
 
       # Update the records for this host
-      system.update_resources_for_this_host(db)
+      system.update_resources_for_this_host(cache, db)
       return value
 
     return wrapper_resource
@@ -92,9 +94,7 @@ def function_two(*args, **kwargs):
 # MAIN
 # -------------------------------------
 
-in_container = os.environ.get('IN_CONTAINER', False)
-if (in_container):
-  system.register_this_container(db)
+system.register_this_container(cache, db)
 
 @app.route('/')
 def top_level_handler():

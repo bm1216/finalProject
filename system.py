@@ -22,7 +22,7 @@ def get_resources():
   return free_cpu, mem.available
 
 
-def register_this_container(db):
+def register_this_container(cache, db):
   """
   Registers this container in the shared database. This allows other
   containers to look it up and send functions to it
@@ -36,6 +36,9 @@ def register_this_container(db):
 
   my_host_name = socket.gethostname()
   my_ip = socket.gethostbyname(my_host_name)
+  cache["ip"] = my_ip
+  cache["host"] = my_host_name
+
   free_cpu, free_mem = get_resources()
 
   logger.info({"host_name": my_host_name, "ip": my_ip})
@@ -49,13 +52,13 @@ def register_this_container(db):
     raise e
 
 
-def update_resources_for_this_host(db):
+def update_resources_for_this_host(cache, db):
   """
   Registers this container's resources in the shared database.
   """
-  my_host_name = socket.gethostname()
-  my_ip = socket.gethostbyname(my_host_name)
   free_cpu, free_mem = get_resources()
+  my_ip = cache["ip"]
+
 
   logger.info("UPDATING", extra = {"cpu": free_cpu, "mem": free_mem, "ip": my_ip})
   try:
@@ -63,6 +66,7 @@ def update_resources_for_this_host(db):
   except Exception as e:
     logger.error(e)
     raise e  
+
 
 def check_resources(reqs):
   """
@@ -88,32 +92,37 @@ def check_if_free_resources(free_mem, free_cpu, reqs):
     return False
 
 
-def find_best_container_for_func(db, func_name, reqs):
+def find_best_container_for_func(cache, db, reqs):
   """
   Find the best container to execute this function.
   Using the sort(filter()) technique to find the best container.
   """
-  containers = db.smembers(SET_NAME)
   valid_containers = []
+  my_ip = cache["ip"]
 
+  containers = db.smembers(SET_NAME)
+  containers.remove(my_ip)
+  
   logger.info("CONTAINERS: " + str(containers))
 
   # Get a list of valid containers.
   for container in containers:
-    container = str(container, encoding="utf-8")
+    container = str(container)
     logger.info(container)
     try:
       container_info = db.hgetall(container)
+      logger.info(container_info)
     except Exception as e:
       logger.error(e)
       raise e
 
-    logger.info("INFO", extra={"cpu": container_info.cpu, "mem": container_info.mem})
+    logger.info("INFO", extra={"cpu": container_info["cpu"], "mem": container_info["mem"]})
 
-    if (check_if_free_resources(container_info.mem, container_info.cpu, reqs)):
+    if (check_if_free_resources(float(container_info["mem"]), float(container_info["cpu"]), reqs)):
       valid_containers.append(container)
 
   logger.info("THESE ARE THE BEST CONTAINERS", extra={"valid_containers": valid_containers})
+
   # For now just return the first valid container.
   return None if not valid_containers else valid_containers[0]
 
@@ -122,7 +131,7 @@ def execute_function_on_host(best_host, func_name):
   Executes the function on another host
   """
   logger.info("SENDING request to best host.")
-  r = requests.get("{best_host}", json={"func": func_name})
+  r = requests.get("http://{}:8080/".format(best_host), json={"func": func_name})
   logger.info(r)
   return r.content
 
