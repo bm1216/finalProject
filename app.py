@@ -13,6 +13,8 @@ import logging
 import sys
 import psutil
 import signal
+import threading
+import utils
 
 from logger import logger
 import system
@@ -23,9 +25,17 @@ import system
 app = Flask(__name__)
 cache = {}
 
-db = redis.Redis(host=os.environ.get('REDIS_HOST', 'localhost'), decode_responses=True)
-system.register_this_container(cache, db)
+# We need to execute this once initially or it returns 0.0
+psutil.cpu_percent(percpu=True, interval=None)
 
+db = redis.Redis(host=os.environ.get('REDIS_HOST', 'localhost'), decode_responses=True)
+# UGLY: busy waiting for redis to become live.
+while not db.ping():
+  logger.info(db.ping())
+  time.sleep(1)
+
+system.register_this_container(cache, db)
+# Handler for exit signal
 def exit_gracefully(signum, frame):
   logger.info("Quitting Gracefully. Removing containers from db.")
   db.srem("containers", cache["ip"])
@@ -34,13 +44,20 @@ def exit_gracefully(signum, frame):
 signal.signal(signal.SIGINT, exit_gracefully)
 signal.signal(signal.SIGTERM, exit_gracefully)
 
-# UGLY: busy waiting for redis to become live.
-while not db.ping():
-  logger.info(db.ping())
-  time.sleep(1)
+def thread_function():
+  """
+    Gets and updates resource usage in the background.
+  """
+  while True:    
+    free_cpu, free_mem = system.get_resources()
+    my_ip = cache["ip"]
+
+    logger.info("UPDATING", extra = {"cpu": free_cpu, "mem": free_mem, "ip": my_ip})
+    db.hmset(my_ip, {"cpu": free_cpu, "mem": free_mem})
+    time.sleep(8)
   
-# We need to execute this once initially or it returns 0.0
-psutil.cpu_percent(percpu=True, interval=None)
+update = threading.Thread(target=thread_function, daemon=True)
+update.start()
 
 def req(resources):
   def decorator_resource(func):
@@ -69,7 +86,7 @@ def req(resources):
           system.request_more_resources()
 
       # Update the records for this host
-      system.update_resources_for_this_host(cache, db)
+      # system.update_resources_for_this_host(cache, db)
       return value
 
     return wrapper_resource

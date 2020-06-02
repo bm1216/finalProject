@@ -6,6 +6,10 @@ from logger import logger
 SET_NAME = "containers"
 ONE_MB = 1024.0 * 1024.0
 
+# This is the percentage of utilization below which 
+# a CPU can be considered "free"
+UTILIZATION = 10
+
 # -------------------------------------
 # UNDERLYING SYSTEM
 # -------------------------------------
@@ -17,10 +21,9 @@ def get_resources():
   logger.info(mem)
   free_cpu = 0
   for util in cpu_pct_per_cpu:
-    free_cpu = free_cpu + (100 - util)/float(100)
+    free_cpu = free_cpu + (100 - util - UTILIZATION)/(float(100) - UTILIZATION)
 
   return free_cpu, mem.available
-
 
 def register_this_container(cache, db):
   """
