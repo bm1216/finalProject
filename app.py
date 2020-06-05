@@ -15,6 +15,7 @@ import psutil
 import signal
 import threading
 import utils
+import random
 
 from logger import logger
 import system
@@ -24,6 +25,7 @@ import system
 
 app = Flask(__name__)
 cache = {}
+use_scheduler = os.environ.get('USE_SCHEDULER') == "True"
 
 # We need to execute this once initially or it returns 0.0
 psutil.cpu_percent(percpu=True, interval=None)
@@ -65,32 +67,36 @@ def req(resources):
     @functools.wraps(func)
     def wrapper_resource(*args, **kwargs):
       # Do I have enough resources to execute this function?
-      have_enough = system.check_resources(resources)
+      if use_scheduler:
+        have_enough = system.check_resources(resources)
 
-      logger.info("HAVE ENOUGH: " + str(have_enough))
+        logger.info("HAVE ENOUGH: " + str(have_enough))
 
-      # Get the serverless data. When to load?
-      data_keys = resources.get("data")
-      if (data_keys):
-        for key in data_keys:
-          system.load_serverless_data(cache, db, key)
+        # Get the serverless data. When to load?
+        data_keys = resources.get("data")
+        if (data_keys):
+          for key in data_keys:
+            system.load_serverless_data(cache, db, key)
 
-      if have_enough:
-        # Execute the function and return
-        value = func(*args, **kwargs)
-      else:
-        # Find a better container
-        best_host = system.find_best_container_for_func(cache, db, resources)
-
-        if best_host:
-          # We've found a better host, execute it there
-          value = system.execute_function_on_host(best_host, args[0])
-        else:
-          # Have to execute it here as there's no better host
+        if have_enough:
+          # Execute the function and return
           value = func(*args, **kwargs)
+        else:
+          # Find a better container
+          best_host = system.find_best_container_for_func(cache, db, resources)
 
-          # This means the system is overloaded, we can request more resources from Knative?
-          system.request_more_resources()
+          if best_host:
+            # We've found a better host, execute it there
+            value = system.execute_function_on_host(best_host, args[0])
+          else:
+            # Have to execute it here as there's no better host
+            value = func(*args, **kwargs)
+
+            # This means the system is overloaded, we can request more resources from Knative?
+            system.request_more_resources()
+      else:
+        logger.info("NO SCHEDULING INVOLVED")
+        value = func(*args, **kwargs)
 
       # Update the records for this host
       # system.update_resources_for_this_host(cache, db)
@@ -120,13 +126,20 @@ def function_one(*args, **kwargs):
   data = cache["model1"]
   return "The cache exists in the API = " + data 
 
-
+@utils.timer
 @req({"mem": "500MB", "cpu": "0.5"})
 def function_two(*args, **kwargs):
   # TODO
   my_name = "Barun Mishra"
   # Who stores the data? When is it stored?
-  return my_name
+  return my_name 
+
+@req({"mem": "400MB", "cpu": "0.4", "data": ["model2"]})
+def function_three(*args, **kwargs):
+  r = random.randrange(30)
+  time.sleep(r)
+
+  return "SLEPT FOR {} seconds. The data is {}".format(r, cache["model2"])
 
 # --------------------------------------
 # MAIN
