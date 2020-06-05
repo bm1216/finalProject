@@ -53,7 +53,7 @@ def thread_function():
     my_ip = cache["ip"]
 
     logger.info("UPDATING", extra = {"cpu": free_cpu, "mem": free_mem, "ip": my_ip})
-    db.hmset(my_ip, {"cpu": free_cpu, "mem": free_mem})
+    db.hset(my_ip, mapping={"cpu": free_cpu, "mem": free_mem})
     time.sleep(8)
   
 update = threading.Thread(target=thread_function, daemon=True)
@@ -67,6 +67,10 @@ def req(resources):
       have_enough = system.check_resources(resources)
 
       logger.info("HAVE ENOUGH: " + str(have_enough))
+
+      # Get the serverless data. When to load?
+      for key in resources["data"]:
+        system.load_serverless_data(cache, db, key)
 
       if have_enough:
         # Execute the function and return
@@ -93,6 +97,7 @@ def req(resources):
   return decorator_resource
 
 
+
 def execute_function(func_name):
   """
   Executes the function on this host
@@ -106,16 +111,19 @@ def execute_function(func_name):
 # APPLICATION FUNCTIONS
 # -------------------------------------
 
-@req({"mem": "250MB", "cpu": "0.8"})
+@req({"mem": "250MB", "cpu": "0.8", "data": ["model1"]})
 def function_one(*args, **kwargs):
   # TODO
-  return "Hello function one."
+  data = cache["model1"]
+  return "The cache exists in the API = " + data 
 
 
 @req({"mem": "500MB", "cpu": "0.5"})
 def function_two(*args, **kwargs):
   # TODO
-  return "Hello function two."
+  my_name = "Barun Mishra"
+  # Who stores the data? When is it stored?
+  return my_name
 
 # --------------------------------------
 # MAIN

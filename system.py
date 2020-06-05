@@ -2,6 +2,7 @@ import psutil
 import socket
 import requests
 from logger import logger
+import json
 
 SET_NAME = "containers"
 ONE_MB = 1024.0 * 1024.0
@@ -47,8 +48,7 @@ def register_this_container(cache, db):
   logger.info({"host_name": my_host_name, "ip": my_ip})
   try:
     pipe = db.pipeline()
-    pipe.sadd(SET_NAME, my_ip).hmset(my_ip, {
-        "host_id": my_host_name, "cpu": free_cpu, "mem": free_mem})
+    pipe.sadd(SET_NAME, my_ip).hset(my_ip, mapping={"host_id": my_host_name, "cpu": free_cpu, "mem": free_mem})
     pipe.execute()
   except Exception as e:
     logger.error(e)
@@ -64,7 +64,7 @@ def update_resources_for_this_host(cache, db):
 
   logger.info("UPDATING", extra = {"cpu": free_cpu, "mem": free_mem, "ip": my_ip})
   try:
-     db.hmset(my_ip, {"cpu": free_cpu, "mem": free_mem})
+     db.hset(my_ip, mapping={"cpu": free_cpu, "mem": free_mem})
   except Exception as e:
     logger.error(e)
     raise e  
@@ -121,12 +121,18 @@ def find_best_container_for_func(cache, db, reqs):
     logger.info("INFO", extra={"cpu": container_info["cpu"], "mem": container_info["mem"]})
 
     if (check_if_free_resources(float(container_info["mem"]), float(container_info["cpu"]), reqs)):
-      valid_containers.append(container)
+      availability = 0
+      for key in reqs["data"]:
+        if container_info.get(key):
+          availability = availability + 1
+      valid_containers.append((container, availability))
+
+  # Sort the containers based on how much of the required data is available.
+  valid_containers = sorted(valid_containers, key=lambda tup: tup[1], reverse=True)
 
   logger.info("THESE ARE THE BEST CONTAINERS", extra={"valid_containers": valid_containers})
 
-  # For now just return the first valid container.
-  return None if not valid_containers else valid_containers[0]
+  return None if not valid_containers else valid_containers[0][0]
 
 def execute_function_on_host(best_host, func_name):
   """
@@ -144,3 +150,19 @@ def request_more_resources():
   Asks knative for more application resources, because we think we've run out
   """
   logger.info("NEED MORE RESOURCES!!!!")
+
+
+def load_serverless_data(cache, db, key):
+  # Check if data is currently available in memory. If so then use it.
+  # If not, load it from redis.
+  # After loading, cache it and then tell redis that this container contains the data.
+  try:
+    data = cache.get(key)
+    if not data:
+      value = db.get(key)
+      cache[key] = value
+      db.hset(cache["ip"], key, "True")
+  except Exception as e:
+    logger.error(e)
+    raise e
+  

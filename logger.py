@@ -3,6 +3,7 @@ import logging
 import os
 from pythonjsonlogger import jsonlogger
 
+# Timestamp and log level should be present in every log entry.
 class CustomJsonFormatter(jsonlogger.JsonFormatter):
   def add_fields(self, log_record, record, message_dict):
     super(CustomJsonFormatter, self).add_fields(
