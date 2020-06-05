@@ -39,6 +39,7 @@ system.register_this_container(cache, db)
 def exit_gracefully(signum, frame):
   logger.info("Quitting Gracefully. Removing containers from db.")
   db.srem("containers", cache["ip"])
+  db.delete(cache["ip"])
   sys.exit()
 
 signal.signal(signal.SIGINT, exit_gracefully)
