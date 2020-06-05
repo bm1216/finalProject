@@ -69,8 +69,10 @@ def req(resources):
       logger.info("HAVE ENOUGH: " + str(have_enough))
 
       # Get the serverless data. When to load?
-      for key in resources["data"]:
-        system.load_serverless_data(cache, db, key)
+      data_keys = resources.get("data")
+      if (data_keys):
+        for key in data_keys:
+          system.load_serverless_data(cache, db, key)
 
       if have_enough:
         # Execute the function and return
