@@ -1,0 +1,19 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: helloworld-python
+  namespace: default
+spec:
+  template:
+    spec:
+      containers:
+        - image: docker.io/brapper13/helloworld-python
+          env:
+            - name: TARGET
+              value: "Python Sample v1"
+            - name: LOG_LEVEL
+              value: "DEBUG"
+            - name: REDIS_HOST
+              value: "redis"
+            - name: USE_SCHEDULER
+              value: True
