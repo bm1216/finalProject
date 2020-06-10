@@ -16,4 +16,4 @@ spec:
             - name: REDIS_HOST
               value: "redis"
             - name: USE_SCHEDULER
-              value: True
+              value: "True"
