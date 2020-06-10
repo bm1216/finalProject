@@ -31,6 +31,7 @@ use_scheduler = os.environ.get('USE_SCHEDULER') == "True"
 psutil.cpu_percent(percpu=True, interval=None)
 
 db = redis.Redis(host=os.environ.get('REDIS_HOST', 'localhost'), decode_responses=True)
+
 # UGLY: busy waiting for redis to become live.
 while not db.ping():
   logger.info(db.ping())
@@ -120,6 +121,7 @@ def execute_function(func_name):
 # APPLICATION FUNCTIONS
 # -------------------------------------
 
+@utils.timer
 @req({"mem": "250MB", "cpu": "0.8", "data": ["model1"]})
 def function_one(*args, **kwargs):
   # TODO

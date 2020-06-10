@@ -12,5 +12,5 @@ def timer(func):
         end_time = time.perf_counter()
         run_time = end_time - start_time
         logger.info(f"Finished {func.__name__!r} in {run_time:.6f} secs")
-        return value
+        return {"value": value, "time": run_time}
     return wrapper_timer

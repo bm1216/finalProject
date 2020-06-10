@@ -1,0 +1,33 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: knative-serving
+spec:
+  ports:
+    - port: 6379
+      targetPort: 6379
+  selector:
+    role: redis
+
+
+---
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: redis
+  namespace: knative-serving
+  labels:
+    app: knative
+    role: redis
+spec:
+  containers:
+    - name: master
+      image: docker.io/brapper13/redis
+      env:
+        - name: MASTER
+          value: "true"
+      ports:
+        - containerPort: 6379

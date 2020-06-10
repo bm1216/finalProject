@@ -2,12 +2,12 @@ version: "3"
 
 services:
   redis:
-    image: redis
+    image: docker.io/brapper13/redis
 
   worker:
     image: docker.io/brapper13/helloworld-python
     depends_on:
-      - redis
+      - redis  
     expose:
       - "8080"
     privileged: yes
@@ -17,6 +17,12 @@ services:
       - LOG_LEVEL=DEBUG
       - REDIS_HOST=redis
       - IN_CONTAINER=True
+      - USE_SCHEDULER=True
+    deploy:
+      resources:
+        limits:
+          memory: 350M
+          cpus: '0.8'
       
   nginx:
     image: nginx:latest
