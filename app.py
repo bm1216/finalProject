@@ -132,9 +132,9 @@ def function_one(*args, **kwargs):
 @req({"mem": "500MB", "cpu": "0.5"})
 def function_two(*args, **kwargs):
   # TODO
-  my_name = "Barun Mishra"
+  # my_name = "Barun Mishra"
   # Who stores the data? When is it stored?
-  return my_name 
+  return cache["ip"] 
 
 @req({"mem": "400MB", "cpu": "0.4", "data": ["model2"]})
 def function_three(*args, **kwargs):
