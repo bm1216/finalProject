@@ -7,6 +7,11 @@ This is a distributed scheduler that loadbalances requests between serverless fu
 ```python
 @req({"mem": "500MB", "cpu": "0.5", "data": ["model1"]})
 def function(*args, **kwargs):
+  value = cache["model1"]
+  epochs = value["epochs"]
+  alpha = value["learning_rate"]
+  batch_size = value["batch_size"]
+ 
   return "Hello World"
 ```
 
