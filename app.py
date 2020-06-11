@@ -114,8 +114,8 @@ def execute_function(func_name):
   """
   try:
     return globals()[func_name](func_name)
-  except:
-    return 404
+  except Exception as e:
+    return e
 
 # -------------------------------------
 # APPLICATION FUNCTIONS
@@ -156,12 +156,12 @@ def top_level_handler():
   func_name = json_data.get("func")
 
   # Execute the function who's name is provided
-  value = execute_function(func_name)
+  try:
+    value = execute_function(func_name)
+  except Exception as e:
+    return e, 404
 
-  if value == 404:
-    return "Error!", 404
-  else:
-    return value
+  return value
 
 
 if __name__ == "__main__":
