@@ -12,4 +12,5 @@ response = function(status, headers, body)
   end
 
   return wrk.format(counter)
+end
 
