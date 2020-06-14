@@ -159,6 +159,7 @@ def load_serverless_data(cache, db, key):
   try:
     data = cache.get(key)
     if not data:
+      logger.info(key)
       value = db.get(key)
       cache[key] = value
       db.hset(cache["ip"], key, "True")

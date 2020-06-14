@@ -16,6 +16,9 @@ import signal
 import threading
 import utils
 import random
+import pickle
+import torch
+import network
 
 from logger import logger
 import system
@@ -31,6 +34,9 @@ use_scheduler = os.environ.get('USE_SCHEDULER') == "True"
 psutil.cpu_percent(percpu=True, interval=None)
 
 db = redis.Redis(host=os.environ.get('REDIS_HOST', 'localhost'), decode_responses=True)
+pickled_db = redis.Redis(host=os.environ.get('REDIS_HOST', 'localhost'), decode_responses=False)
+
+
 
 # UGLY: busy waiting for redis to become live.
 while not db.ping():
@@ -73,14 +79,16 @@ def req(resources):
 
         logger.info("HAVE ENOUGH: " + str(have_enough))
 
-        # Get the serverless data. When to load?
-        data_keys = resources.get("data")
-        if (data_keys):
-          for key in data_keys:
-            system.load_serverless_data(cache, db, key)
-
         if have_enough:
           # Execute the function and return
+          # Get the serverless data. When to load?
+          data_keys = resources.get("data")
+          if (data_keys):
+            for key in data_keys:
+              if key == "state_dict":
+                system.load_serverless_data(cache, pickled_db, key)
+              else:
+                system.load_serverless_data(cache, db, key)
           value = func(*args, **kwargs)
         else:
           # Find a better container
@@ -90,6 +98,13 @@ def req(resources):
             # We've found a better host, execute it there
             value = system.execute_function_on_host(best_host, args[0])
           else:
+            if (data_keys):
+              for key in data_keys:
+                if key == "state_dict":
+                  system.load_serverless_data(cache, pickled_db, key)
+                else:
+                  system.load_serverless_data(cache, db, key)
+
             # Have to execute it here as there's no better host
             value = func(*args, **kwargs)
 
@@ -108,14 +123,55 @@ def req(resources):
 
 
 
-def execute_function(func_name):
+def execute_function(func_name, num):
   """
   Executes the function on this host
   """
   try:
-    return globals()[func_name](func_name)
+    return globals()[func_name](func_name, num)
   except Exception as e:
     return e
+
+def Fibonacci(n):
+  if n<0: 
+    logger.error("Incorrect input")
+    return 0 
+  # First Fibonacci number is 0 
+  elif n==0: 
+    return 0
+  # Second Fibonacci number is 1 
+  elif n==1: 
+    return 1
+  else: 
+    return Fibonacci(n-1) + Fibonacci(n-2) 
+
+def evaluate(rnn, line_tensor):
+    hidden = rnn.initHidden()
+
+    for i in range(line_tensor.size()[0]):
+        output, hidden = rnn(line_tensor[i], hidden)
+
+    return output
+
+# all_letters = string.ascii_letters + " .,;'"
+# n_letters = len(all_letters)
+# # Find letter index from all_letters, e.g. "a" = 0
+# def letterToIndex(letter):
+#     return all_letters.find(letter)
+
+# # Just for demonstration, turn a letter into a <1 x n_letters> Tensor
+# def letterToTensor(letter):
+#     tensor = torch.zeros(1, n_letters)
+#     tensor[0][letterToIndex(letter)] = 1
+#     return tensor
+
+# # Turn a line into a <line_length x 1 x n_letters>,
+# # or an array of one-hot letter vectors
+# def lineToTensor(line):
+#     tensor = torch.zeros(len(line), 1, n_letters)
+#     for li, letter in enumerate(line):
+#         tensor[li][0][letterToIndex(letter)] = 1
+#     return tensor
 
 # -------------------------------------
 # APPLICATION FUNCTIONS
@@ -143,6 +199,35 @@ def function_three(*args, **kwargs):
 
   return "SLEPT FOR {} seconds. The data is {}".format(r, cache["model2"])
 
+@utils.timer
+@req({"mem": "400MB", "cpu": "1.0"})
+def function_four(*args, **kwargs):
+  num = args[1]
+  logger.info(num)
+  return "{}".format(Fibonacci(num))
+
+@utils.timer
+@req({"mem": "600MB", "cpu": "0.8", "data": ["state_dict"]})
+def function_five(*args, **kwargs):
+  input_line = args[1]
+  print(input_line)
+  data = cache["state_dict"]
+  state_dict = pickle.loads(data)
+  rnn = network.RNN(57, 128, 18)
+  rnn.load_state_dict(state_dict)
+  rnn.eval()
+  with torch.no_grad():
+      output = evaluate(rnn, network.lineToTensor(input_line))
+  logger.info(output)
+  return "OK"
+
+@utils.timer
+@req({"mem": "500MB", "cpu": "0.8", "data": ["big_file"]})
+def function_six(*args, **kwargs):
+  data = cache["big_file"]
+  return "{}".format(sys.getsizeof(data))
+  
+
 # --------------------------------------
 # MAIN
 # -------------------------------------
@@ -157,7 +242,7 @@ def top_level_handler():
 
   # Execute the function who's name is provided
   try:
-    value = execute_function(func_name)
+    value = execute_function(func_name, json_data.get("n"))
   except Exception as e:
     return e, 404
 
