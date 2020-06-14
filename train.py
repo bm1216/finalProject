@@ -7,7 +7,7 @@ import torch.nn as nn
 import redis
 import sys
 
-redis = redis.Redis('localhost')
+db = redis.Redis(host=os.environ.get('REDIS_HOST', 'localhost'))
 
 def findFiles(path): return glob.glob(path)
 
@@ -199,7 +199,7 @@ dString = pickle.dumps(state_dict)
 # print(dString)
 print(type(dString))
 
-redis.set("state_dict", dString)
+db.set("state_dict", dString)
 
 # data = redis.get("state_dict")
 # dPickle = pickle.loads(data)
@@ -221,7 +221,7 @@ f = open("100MB.txt", "r")
 x = f.read()
 
 print(type(x))
-redis.set("big_file", x)
+db.set("big_file", x)
 
 
 def predict(input_line, n_predictions=3):

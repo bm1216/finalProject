@@ -98,6 +98,7 @@ def req(resources):
             # We've found a better host, execute it there
             value = system.execute_function_on_host(best_host, args[0])
           else:
+            data_keys = resources.get("data")
             if (data_keys):
               for key in data_keys:
                 if key == "state_dict":

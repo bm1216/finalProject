@@ -24,6 +24,14 @@ services:
           memory: 350M
           cpus: '0.8'
       
+  data:
+    image: docker.io/brapper13/populate
+    depends_on:
+      - redis  
+    privileged: yes
+    environment:
+      - REDIS_HOST=redis
+
   nginx:
     image: nginx:latest
     volumes:
